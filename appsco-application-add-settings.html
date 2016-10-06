@@ -12,7 +12,6 @@
 <link rel="import" href="../neon-animation/animations/fade-out-animation.html">
 
 <link rel="import" href="../appsco-header/appsco-loader.html">
-<link rel="import" href="../appsco-signup/appsco-form-error.html">
 <link rel="import" href="appsco-application-info.html">
 
 <!--
@@ -59,18 +58,6 @@ Custom property | Description | Default
         <div id="appscoApplicationSettings">
 
             <appsco-loader active="[[ _loader ]]" loader-alt="Appsco is saving application" multi-color></appsco-loader>
-
-            <form-error message="[[ _error ]]"></form-error>
-
-            <form is="iron-form"
-                  hidden
-                  id="addApplicationForm"
-                  method="post"
-                  action$="{{ _computedAction }}"
-                  headers="{{ _computedHeaders }}"
-                  on-iron-form-response="_onFormResponse">
-                <paper-input type="text" name="application[resource]" value="[[ application.self ]]"></paper-input>
-            </form>
 
             <form id="saveApplicationForm">
                 <paper-input
@@ -179,13 +166,6 @@ Custom property | Description | Default
                 },
 
                 /**
-                 * Error message for settings form.
-                 */
-                _error: {
-                    type: String
-                },
-
-                /**
                  * Animation config with hero animation.
                  */
                 animationConfig: {
@@ -287,12 +267,52 @@ Custom property | Description | Default
             _submit: function () {
                 var me = this;
 
-                this._submitApplicationConfigure().then(function(application) {
-                    me._submitNewClaims(application).then(function() {
+                this._submitApplicationAsIcon().then(function(application) {
 
-                        me._onApplicationAdded();
+                    me._submitApplicationConfigure(application).then(function(application) {
+                        me._submitNewClaims(application).then(function() {
 
+                            me._onApplicationAdded();
+
+                        });
                     });
+
+                });
+            },
+
+            _submitApplicationAsIcon: function() {
+                var me = this;
+
+                return new Promise(function(resolve, reject) {
+                    var body = '';
+
+                    if (me.application.self) {
+                        body = encodeURIComponent('application[resource]') + '=' + encodeURIComponent(me.application.self);
+                    }
+
+                    if('' != body) {
+                        var options = {
+                            url: me.dashboardApi + '/icons',
+                            method: 'POST',
+                            body: body,
+                            handleAs: 'json',
+                            headers: {
+                                'Authorization': 'token ' + me.authorizationToken,
+                                'Content-Type': 'application/x-www-form-urlencoded'
+                            }
+                        };
+
+                        var request = document.createElement('iron-request');
+                        request.send(options).then(function() {
+
+                            if (request.succeeded) {
+                                resolve(request.response.icon);
+                            }
+
+                        });
+                    } else {
+                        resolve(false);
+                    }
                 });
             },
 
@@ -302,24 +322,24 @@ Custom property | Description | Default
              * @returns {*}
              * @private
              */
-            _submitApplicationConfigure: function() {
+            _submitApplicationConfigure: function(application) {
                 var me = this;
 
-                return new Promise(function(resolve, reject){
+                return new Promise(function(resolve, reject) {
                     var body = '';
 
-                    if (me.application.title != me.$.title.value) {
+                    if (application.title != me.$.title.value) {
                         body = encodeURIComponent(me.$.title.name) + '=' + encodeURIComponent(me.$.title.value);
                     }
 
-                    if (me.application.url != me.$.url.value) {
+                    if (application.url != me.$.url.value) {
                         body += body == "" ? '' : '&';
                         body += encodeURIComponent(me.$.url.name) + '=' + encodeURIComponent(me.$.url.value);
                     }
 
                     if('' != body) {
                         var options = {
-                            url: me.application.self + '/application',
+                            url: application.self + '/application',
                             method: 'PATCH',
                             body: body,
                             handleAs: 'json',
@@ -353,26 +373,32 @@ Custom property | Description | Default
             _submitNewClaims: function(application) {
                 var me = this;
 
-                return new Promise(function(resolve, reject){
-                    var body = '';
+                return new Promise(function(resolve, reject) {
+                    var body = '',
+                        username = me.$.username.value ? me.$.username.value : '',
+                        password = me.$.password.value ? me.$.password.value : '',
+                        note = me.$.note.value ? me.$.note.value : '';
 
                     if(
-                            me.application.claims.username != me.$.username.value ||
-                            me.application.claims.password != me.$.password.value ||
-                            me.application.claims.note != me.$.note.value
+                            application.claims &&
+                            username != '' &&
+                            password != '' &&
+                            (application.claims.username != username ||
+                            application.claims.password != password ||
+                            application.claims.note != note)
                     ) {
                         body =
-                                encodeURIComponent(me.$.username.name) + '=' + encodeURIComponent(me.$.username.value) +
+                                encodeURIComponent(me.$.username.name) + '=' + encodeURIComponent(username) +
                                 '&' +
-                                encodeURIComponent(me.$.password.name) + '=' + encodeURIComponent(me.$.password.value) +
+                                encodeURIComponent(me.$.password.name) + '=' + encodeURIComponent(password) +
                                 '&' +
-                                encodeURIComponent(me.$.note.name) + '=' + encodeURIComponent(me.$.note.value)
+                                encodeURIComponent(me.$.note.name) + '=' + encodeURIComponent(note)
                         ;
                     }
 
                     if('' != body) {
                         var options = {
-                            url: me.application.self,
+                            url: application.self,
                             method: 'PATCH',
                             body: body,
                             handleAs: 'json',
@@ -397,42 +423,11 @@ Custom property | Description | Default
             },
 
             /**
-             * Called on form error when trying to add new application as icon.
-             *
-             * @param {Object} event
-             * @private
-             */
-            _onFormError: function(event) {
-                this._error = event.detail.error.message;
-                this._loader = false;
-            },
-
-            /**
-             * Called after application is added as icon.
-             * It calls application configure method.
-             *
-             * @param {Object} event
-             * @private
-             */
-            _onFormResponse: function(event) {
-                var icon = event.detail.response.icon;
-
-                this.application = icon;
-
-                if (this.$.username.value != '' && this.$.password.value != '') {
-                    this._submit();
-                }
-                else {
-                    this._onApplicationAdded();
-                }
-            },
-
-            /**
              * Submits form which adds application as item.
              */
             addApplication: function() {
                 this._loader = true;
-                this.$.addApplicationForm.submit();
+                this._submit();
             },
 
             /**
@@ -457,7 +452,6 @@ Custom property | Description | Default
              */
             reset: function() {
                 this._icon = {};
-                this.$.addApplicationForm.reset();
                 this.$.saveApplicationForm.reset();
                 this.$.url.invalid = false;
             }
